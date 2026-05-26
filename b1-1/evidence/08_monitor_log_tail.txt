@@ -1,0 +1,7 @@
+$ docker exec b1-1-agent bash -c 'echo '--- monitor.log ---'; cat $AGENT_LOG_DIR/monitor.log; echo; echo '--- 누적 라인 수 ---'; wc -l $AGENT_LOG_DIR/monitor.log'
+--- monitor.log ---
+[2026-05-26 11:43:36] PID:314 CPU:2.7% MEM:8.9% DISK_USED:1.0%
+[2026-05-26 11:44:02] PID:314 CPU:2.7% MEM:10.2% DISK_USED:1.0%
+
+--- 누적 라인 수 ---
+2 /var/log/agent-app/monitor.log

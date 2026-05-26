@@ -1,0 +1,8 @@
+$ docker exec b1-1-agent bash -c 'cat /etc/ssh/sshd_config.d/10-agent.conf; echo; echo '--- ss -tulnp | grep sshd ---'; ss -tulnp | grep -E 'sshd|:20022''
+Port 20022
+PermitRootLogin no
+PasswordAuthentication yes
+
+--- ss -tulnp | grep sshd ---
+tcp   LISTEN 0      128          0.0.0.0:20022      0.0.0.0:*    users:(("sshd",pid=19,fd=3))      
+tcp   LISTEN 0      128             [::]:20022         [::]:*    users:(("sshd",pid=19,fd=4))      

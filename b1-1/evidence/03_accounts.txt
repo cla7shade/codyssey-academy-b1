@@ -1,0 +1,8 @@
+$ docker exec b1-1-agent bash -c 'for u in agent-admin agent-dev agent-test; do id $u; done; echo; echo '--- getent group ---'; getent group agent-common agent-core'
+uid=1001(agent-admin) gid=1003(agent-admin) groups=1003(agent-admin),1001(agent-common),1002(agent-core)
+uid=1002(agent-dev) gid=1004(agent-dev) groups=1004(agent-dev),1001(agent-common),1002(agent-core)
+uid=1003(agent-test) gid=1005(agent-test) groups=1005(agent-test),1001(agent-common)
+
+--- getent group ---
+agent-common:x:1001:agent-admin,agent-dev,agent-test
+agent-core:x:1002:agent-admin,agent-dev

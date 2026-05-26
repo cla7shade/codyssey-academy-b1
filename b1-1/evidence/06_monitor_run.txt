@@ -1,0 +1,12 @@
+$ docker exec b1-1-agent bash -c 'sudo -u agent-admin $AGENT_HOME/bin/monitor.sh $AGENT_HOME/etc/agent.env'
+[HEALTH CHECK]
+Checking process 'agent_app'... [OK] (PID: 314)
+Checking port 15034... [OK]
+
+[RESOURCE MONITORING]
+CPU Usage : 2.7%
+MEM Usage : 8.9%
+DISK Used : 1.0%
+
+
+[INFO] Log appended: /var/log/agent-app/monitor.log

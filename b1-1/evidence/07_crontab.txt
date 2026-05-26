@@ -1,0 +1,2 @@
+$ docker exec b1-1-agent bash -c 'crontab -u agent-admin -l'
+* * * * * /home/agent-admin/agent-app/bin/monitor.sh /home/agent-admin/agent-app/etc/agent.env >> /var/log/agent-app/monitor.cron.log 2>&1

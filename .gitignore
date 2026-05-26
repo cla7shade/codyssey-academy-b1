@@ -1,0 +1,16 @@
+.DS_Store
+
+# 미션 PDF 파일 (재배포 제한)
+mission.pdf
+misson.pdf
+
+# macOS 압축 메타데이터
+__MACOSX/
+
+# 대용량 자료
+agent-app.zip
+b1-1/agent-app/agent-app-linux-arm64
+b1-1/agent-app/agent-app-linux-x86
+
+# 로컬 로그 (혹시 모를 bind-mount 잔여물)
+b1-1/logs/

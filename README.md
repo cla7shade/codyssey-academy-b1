@@ -91,6 +91,37 @@ ufw --force enable
 
 검증: `printenv`로 5개 변수(AGENT_HOME, AGENT_PORT, AGENT_UPLOAD_DIR, AGENT_KEY_PATH, AGENT_LOG_DIR)가 설정됐는지, 앱 부팅 로그의 `[2/5] Verifying Environment Variables [OK]`로 통과 여부를 확인한다.
 
+### 앱 Boot Sequence 5단계와 "Agent READY" 출력
+
+agent_app은 기동 직후 5단계의 자가 진단(Boot Sequence)을 돌리고, 5단계가 모두 `[OK]`여야만 `Agent READY`를 출력하고 포트 15034를 LISTEN한다. 한 단계라도 실패하면 그 자리에서 종료하므로, "READY"가 떴다는 것은 곧 실행 환경(계정·환경변수·키파일·포트·로그 권한)이 모두 정상이라는 뜻이다. 실제 출력은 [evidence/05_boot_sequence.txt](./evidence/05_boot_sequence.txt) 에 수집돼 있다.
+
+```
+>>> Starting Agent Boot Sequence...
+[1/5] Checking User Account               [OK]
+   ... Running as service user 'agent-admin' (uid=1001)
+[2/5] Verifying Environment Variables     [OK]
+   ... All required Envs correct
+[3/5] Checking Required Files             [OK]
+   ... Verified 'secret.key' with correct key string.
+[4/5] Checking Port Availability          [OK]
+   ... Port 15034 is available.
+[5/5] Verifying Log Permission            [OK]
+   ... Log directory is writable: /var/log/agent-app
+------------------------------------------------------------
+All Boot Checks Passed!
+Agent READY
+```
+
+| 단계 | 검사 내용 | 통과 근거 |
+| --- | --- | --- |
+| 1/5 User Account | root 가 아닌 서비스 계정으로 실행 중인가 | `runuser -u agent-admin` 으로 기동 (uid=1001) |
+| 2/5 Environment Variables | 필수 env 5개가 모두 올바른가 | docker 가 주입한 AGENT_* 값 |
+| 3/5 Required Files | `$AGENT_KEY_PATH/secret.key` 가 올바른 키 값으로 존재하는가 | entrypoint 가 `secret.key` 생성 (640) |
+| 4/5 Port Availability | 15034 포트를 바인딩할 수 있는가 | 다른 프로세스가 점유하지 않음 |
+| 5/5 Log Permission | 로그 디렉토리에 쓸 수 있는가 | `/var/log/agent-app` 가 agent-core 그룹에 rwx |
+
+검증: `docker logs b1-1-agent` 에서 `[1/5]`~`[5/5]` 가 전부 `[OK]` 이고 마지막에 `Agent READY` 가 찍히는지, 이어서 `ss -tulnp | grep :15034` 로 `0.0.0.0:15034` LISTEN 을 확인한다.
+
 ### 쉘 스크립트로 프로세스/포트/리소스를 수집·로깅하여 운영 문제 추적하는 흐름
 
 장애는 갑자기 오지 않는다. 보통 CPU/메모리가 서서히 차오르거나, 프로세스가 죽은 채로 한참 방치되거나, 포트가 막혀 있는 상태로 운영된다. 사람이 매번 들여다보지 못하니 자동화가 필요하다.
@@ -98,6 +129,103 @@ ufw --force enable
 monitor.sh는 먼저 Health Check로 대상 프로세스(`agent_app`)가 살아있는지, 포트 15034가 LISTEN 중인지 확인하고 둘 중 하나라도 실패하면 `exit 1`로 즉시 알린다. UFW가 켜져있는지도 보지만 비활성이면 `[WARNING]`만 출력하고 계속 진행한다. 관제 자체가 멈추면 안 되기 때문이다. 그 뒤 CPU/MEM/DISK 사용률을 수치로 뽑고, 정해둔 한계(CPU>20, MEM>10, DISK>80)를 넘으면 `[WARNING]`을 찍는다. 마지막에 `/var/log/agent-app/monitor.log`로 `[YYYY-MM-DD HH:MM:SS] PID:.. CPU:..% MEM:..% DISK_USED:..%` 한 줄을 append 한다.
 
 로그는 "지금 이 순간"의 상태가 아니라 "시간에 따른 변화"를 봐야 의미가 있기 때문에 누적 기록이 핵심이다. 장애가 났을 때 로그를 뒤져 추세를 보고 원인을 추적한다.
+
+### 프로세스 식별 / 포트 확인에 쓴 명령과 선택 이유
+
+프로세스 식별 — `pgrep`
+
+```bash
+PID=$(pgrep -x "$APP_NAME" | head -n 1 || true)
+```
+
+- `pgrep -x agent_app` : `-x`는 프로세스 이름이 정확히 일치할 때만 매칭한다. `agent_app_helper` 같은 유사 이름을 오탐하지 않는다. 대상 바이너리 이름이 `agent_app`로 고정돼 있으므로 정확 매칭 한 번으로 충분하다.
+- `ps -ef | grep agent_app` 대신 `pgrep`을 쓴 이유: grep 자기 자신이 결과에 끼어드는 문제(`grep agent_app` 라인)가 없고, PID만 깔끔히 반환해 후처리가 단순하다. `head -n 1`로 첫 PID만 취한다.
+
+포트 확인 — `ss`
+
+```bash
+ss -ltn "( sport = :$AGENT_PORT )" | grep -q ":$AGENT_PORT"
+```
+
+- `ss`는 iproute2의 기본 도구로, 커널 소켓 정보를 직접 조회해 `netstat`보다 빠르다. `netstat`(net-tools)은 deprecated 라 최신 Ubuntu에 기본 설치되지 않는다.
+- 플래그 의미: `-l` LISTEN 상태만, `-t` TCP만, `-n` 포트를 숫자 그대로(이름 변환 안 함). 필요한 정보만 좁혀서 본다.
+- `( sport = :PORT )` 필터로 해당 포트의 소켓만 직접 거른다. "프로세스가 살아있다"와 "포트가 실제로 열려 LISTEN 중이다"는 별개 상태이므로 둘을 따로 검사한다(→ 트러블슈팅의 "프로세스는 살아있는데 포트가 안 열림" 참고).
+
+### CPU/MEM/DISK 추출·파싱 방식과 로그 포맷을 고정한 이유
+
+CPU — `/proc/stat` 2회 샘플링
+
+```bash
+read _ user nice system idle iowait irq softirq steal _ < /proc/stat   # 1차
+sleep 1
+read _ user nice system idle iowait irq softirq steal _ < /proc/stat   # 2차
+# usage = (1 - Δidle / Δtotal) * 100   (awk 로 계산)
+```
+
+CPU 사용률은 누적 tick 값이라 "순간값"이 없다. 그래서 1초 간격으로 두 번 읽어 그 사이의 증가분(Δ)으로 구간 사용률을 구한다. `(1 - idle증가/total증가)×100`. 부동소수 계산이라 bash 산술 대신 `awk`로 처리한다.
+
+MEM — `free` + `awk`
+
+```bash
+free | awk '/^Mem:/ { printf "%.1f", ($3 / $2) * 100 }'
+```
+
+`Mem:` 줄에서 `$2`(total), `$3`(used)를 뽑아 used/total 백분율을 낸다.
+
+DISK — `df -P` + `awk`
+
+```bash
+df -P / | awk 'NR==2 { gsub("%","",$5); print $5 }'
+```
+
+루트(`/`) 파티션의 사용률 필드(`$5`)를 취하고 `gsub`로 `%` 기호를 제거해 숫자만 남긴다. `df`에 `-P`(POSIX 출력)를 준 이유: 장치명이 길면 줄이 두 줄로 깨지는데, `-P`는 한 줄로 고정해줘 `NR==2`/`$5` 필드 위치가 항상 일정하다.
+
+로그 포맷을 한 줄·고정 필드로 박은 이유
+
+```
+[2026-05-26 11:44:02] PID:314 CPU:2.7% MEM:10.2% DISK_USED:1.0%
+```
+
+`[시각] PID:.. CPU:..% MEM:..% DISK_USED:..%` 로 한 줄 = 한 시점, 필드 순서를 고정했다. 이렇게 해야 나중에 `grep`/`awk`/`cut`으로 특정 시간대나 특정 지표만 뽑아 추세를 분석하기 쉽다(머신 파싱 친화). 시각을 맨 앞에 둔 것도 시간순 정렬·구간 추출을 자연스럽게 하기 위함이다.
+
+### 소유자(agent-dev)와 실행자(agent-admin, cron) 권한 정책
+
+monitor.sh는 [entrypoint.sh](./scripts/entrypoint.sh)에서 다음과 같이 배치된다.
+
+```bash
+install -m 750 -o agent-dev -g agent-core /opt/setup/monitor.sh "$AGENT_HOME/bin/monitor.sh"
+```
+
+| 비트 | 대상 | 권한 | 의미 |
+| --- | --- | --- | --- |
+| `7` | owner = agent-dev | rwx | 스크립트를 작성·수정하는 개발자가 소유 |
+| `5` | group = agent-core | r-x | 그룹 멤버는 읽기·실행만 (수정 불가) |
+| `0` | other | --- | 무관 계정 완전 차단 |
+
+- 소유자(agent-dev): 스크립트의 작성/유지보수 주체가 개발자이므로 소유권을 가져 변경할 수 있다.
+- 실행자(agent-admin, cron): 운영자 agent-admin은 `agent-core` 그룹 멤버라 그룹 `r-x` 비트로 스크립트를 실행할 수 있지만(쓰기는 불가) 내용은 못 바꾼다 — 운영자가 멋대로 로직을 수정하는 것을 막는다. cron은 agent-admin의 crontab으로 등록돼 동일 권한으로 매분 실행한다.
+- 로그 기록 연결: monitor.log가 있는 `/var/log/agent-app`는 `agent-core` 그룹 소유에 `2770`(setgid)이라, agent-core 멤버인 agent-admin이 로그를 append할 수 있다. agent-test는 agent-core가 아니므로 실행·로그 접근 모두 차단된다(최소 권한).
+
+검증: `ls -l $AGENT_HOME/bin/monitor.sh` 로 `-rwxr-x--- agent-dev agent-core` 확인, `crontab -u agent-admin -l` 로 실행 주체 확인, `id agent-admin` 으로 agent-core 멤버십 확인.
+
+### 파일·디렉토리별 소유자/그룹/권한/ACL 일람
+
+[entrypoint.sh](./scripts/entrypoint.sh)의 `chown` / `chmod` / `setfacl` 설정을 경로별로 정리한 표다. (경로는 env 기준값으로 표기)
+
+| 경로 | 종류 | 소유자 | 그룹 | 권한 | ACL(setfacl) | 결과(접근 정책) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `$AGENT_HOME` (`/home/agent-admin/agent-app`) | dir | agent-admin | agent-common | `750` | — | 소유자 rwx, common 그룹 r-x(진입), 그 외 차단 |
+| `$AGENT_HOME/bin` | dir | agent-admin | agent-common | `755` (mkdir 기본, 별도 chmod 없음) | — | 소유자(agent-admin) rwx → **이 디렉토리 안 파일 생성·삭제·교체 가능** |
+| `$AGENT_HOME/bin/monitor.sh` | file | agent-dev | agent-core | `750` | — | owner(dev) rwx, core 그룹(admin 포함) r-x(실행), other 차단. 단 상위 `bin`을 admin이 소유 → admin이 rm 후 교체는 가능 |
+| `$AGENT_HOME/etc` | dir | agent-admin | agent-admin | `700` | — | admin 전용 |
+| `$AGENT_HOME/etc/agent.env` | file | agent-admin | agent-admin | `600` | — | admin만 R/W (env 비밀값 보호) |
+| `$AGENT_UPLOAD_DIR` (`upload_files`) | dir | agent-admin | agent-common | `2770` | `g:agent-common:rwx` + default 동일 | common(admin/dev/test) 공유 R/W, setgid+default ACL로 새 파일도 그룹/권한 상속, other 차단 |
+| `$AGENT_KEY_PATH` (`api_keys`) | dir | agent-admin | agent-core | `2770` | `g:agent-core:rwx` + default 동일 + `o::---` | core(admin/dev)만 R/W, test/other 완전 차단 |
+| `$AGENT_KEY_PATH/secret.key` | file | agent-admin | agent-core | `640` | 상위 default ACL 상속(`g:agent-core:rwx`)하나 `640` mask로 그룹 실효권한 `r--` | owner rw, core 그룹 r, other 차단 |
+| `$AGENT_LOG_DIR` (`/var/log/agent-app`) | dir | agent-admin | agent-core | `2770` | `g:agent-core:rwx` + default 동일 + `o::---` | core만 R/W, 로그 보호 |
+| `$AGENT_LOG_DIR/monitor.log` | file | agent-admin | agent-core | 런타임 생성 | 상위 default ACL 상속(`g:agent-core:rwx`) | monitor.sh 실행 중 첫 append 시 생성, setgid로 그룹=core 상속 → core 멤버가 기록 |
+
+참고: `secret.key`와 `monitor.log`는 ACL을 직접 부여하지 않고, 상위 디렉토리의 **default ACL**과 **setgid**로 소유 그룹/권한을 자동 상속받는다. 즉 디렉토리에 한 번 정책을 박아두면 그 안에 생기는 새 파일에도 동일 정책이 적용된다.
 
 ### crontab 주기 실행 및 로그 보존 정책(압축/삭제) 필요성
 
@@ -108,6 +236,60 @@ monitor.sh는 먼저 Health Check로 대상 프로세스(`agent_app`)가 살아�
 그래서 보존 정책이 같이 필요하다. 일정 크기(10MB)를 넘으면 새 파일로 회전하고(logrotate가 담당), 최대 10개까지만 보관해 가장 오래된 것부터 삭제한다. 보너스로 시간 기반 정책(7일 경과 압축, 30일 경과 아카이브 삭제)을 추가하면 디스크 공간을 더 안정적으로 관리할 수 있다.
 
 운영 가시성을 유지하면서도 디스크가 차지 않게 하는 균형이다.
+
+
+## 운영 시나리오 / 트러블슈팅
+
+### 모니터링 대상이 웹 서버(Nginx)로 바뀐다면 monitor.sh에서 바꿀 핵심 포인트
+
+monitor.sh의 골격(Health Check → 자원 수집 → 임계값 경고 → 로그 append)은 그대로 두고, "무엇을 보는가"에 해당하는 4가지만 바꾸면 된다.
+
+| 포인트 | 현재(agent_app) | Nginx로 변경 시 |
+| --- | --- | --- |
+| 프로세스 | `APP_NAME=agent_app` | `nginx`. 단 Nginx는 master + 다수 worker 구조라 `pgrep -x nginx`가 여러 PID를 반환한다 → master만 보려면 `pgrep -x nginx | head -n 1` 또는 master 프로세스를 기준으로 판정 |
+| 포트 | `$AGENT_PORT`(15034) | `80`(HTTP) / `443`(HTTPS). 둘 다 검사하려면 포트 확인을 두 번 돌린다 |
+| 로그 | `$AGENT_LOG_DIR/monitor.log`에 관제 결과 기록 | 관제 결과 경로는 유지하되, 점검 대상 앱 로그는 `/var/log/nginx/access.log`·`error.log`. 필요 시 error.log의 최근 에러도 같이 수집 |
+| 임계값 | CPU>20 MEM>10 DISK>80 | 웹 트래픽 특성에 맞게 재조정(상시 높은 CPU/커넥션 수 등). 5xx 비율·동시 커넥션 같은 웹 전용 지표를 추가할 수도 있음 |
+
+핵심은 "프로세스 이름 / 포트 / 로그 경로 / 임계값"이 대상에 종속된 값이고, 수집·판정·기록 로직은 재사용된다는 점이다. 그래서 이런 값들은 스크립트 상단 변수로 빼두는 게 유지보수에 유리하다.
+
+### "프로세스는 살아있는데 포트가 안 열리는" 상황 — 원인 후보와 확인 순서
+
+monitor.sh는 프로세스 검사와 포트 검사를 일부러 분리한다. 둘은 별개 상태라, 프로세스는 `[OK]`인데 포트가 `[FAIL]`인 경우가 실제로 생긴다.
+
+원인 후보
+
+1. 앱이 아직 초기화 중 — 프로세스는 떴지만 소켓 바인딩 전(기동 지연).
+2. 바인딩 주소가 다름 — `127.0.0.1`(루프백)에만 바인딩돼 외부/0.0.0.0에서 안 보임.
+3. 포트 충돌 — 다른 프로세스가 포트를 선점해 바인딩 실패했지만 프로세스 본체는 죽지 않고 잔존.
+4. 방화벽 차단 — 앱은 LISTEN 중인데 UFW가 해당 포트를 막아 외부에서 닫힌 것처럼 보임.
+5. 설정상 다른 포트 — 설정 파일의 포트 값이 기대값과 달라 엉뚱한 포트로 리슨.
+
+확인 순서(싼·빠른 것부터)
+
+1. `ss -ltnp` — 실제로 LISTEN 중인지, 바인딩 주소가 `0.0.0.0`인지 `127.0.0.1`인지, 어떤 PID가 잡고 있는지 한 번에 본다.
+2. 앱 로그 확인 — `bind: Address already in use` / `permission denied` 같은 바인딩 에러가 있는지.
+3. 포트 점유 프로세스 확인 — `ss -ltnp 'sport = :PORT'`로 다른 프로세스가 선점했는지(원인 3).
+4. `ufw status` — 포트가 ALLOW 목록에 있는지(원인 4).
+5. 앱 설정 파일의 포트/바인딩 주소 값 확인(원인 2·5).
+
+### 로그 급증으로 디스크가 찰 위험 — 운영자의 단기/중기 대응
+
+로그가 폭주하면 디스크가 차고, 앱이 로그를 못 써서 죽는 연쇄 장애로 이어진다(disk full). 대응은 "지금 불 끄기(단기)"와 "재발 방지(중기)"로 나눈다.
+
+단기 (즉시 디스크 확보 — 서비스 정지 방지)
+
+1. `df -h`로 어느 파티션이 찼는지, `du -sh /var/log/* | sort -h`로 어떤 디렉토리/파일이 범인인지 식별.
+2. 안전하게 지워도 되는 오래된 회전 로그(`*.1`, `*.gz`)부터 삭제/압축.
+3. `logrotate -f /etc/logrotate.d/agent-monitor`로 즉시 강제 회전.
+4. 가동 중이라 삭제해도 공간이 안 돌아오는(열린 파일) 경우 `truncate -s 0` 또는 logrotate의 `copytruncate`로 파일을 비운다 — 프로세스 재시작 없이 공간 회수.
+
+중기 (재발 방지)
+
+1. logrotate 정책 강화 — `size`/`rotate` 값과 회전 주기 조정, `compress`로 보관본 압축.
+2. 로그 발생량 자체 줄이기 — 앱 로그 레벨을 DEBUG→INFO/WARN으로 낮춰 불필요한 로그 억제.
+3. 중앙 로그 수집 — 로그를 원격(로그 서버/수집기)으로 전송해 로컬 디스크 의존을 끊는다.
+4. 디스크 사용률 알람 — monitor.sh의 DISK 임계값 경고처럼, 디스크가 차기 전에 미리 경보가 울리도록 모니터링을 둔다.
 
 
 ## Linux pipes, redirections

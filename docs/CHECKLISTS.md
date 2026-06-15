@@ -60,6 +60,13 @@
 - [x] `[description]` 환경변수(AGENT_HOME 등) 로 실행 환경을 고정하는 이유와 검증 방법
 - [x] `[description]` 쉘 스크립트로 프로세스/포트/리소스를 수집·로깅하여 운영 문제 추적하는 흐름
 - [x] `[description]` crontab 주기 실행 및 로그 보존 정책(압축/삭제) 필요성
+- [x] `[description]` 앱 Boot Sequence 5단계 `[OK]` + "Agent READY" 출력 설명 (평가 4)
+- [x] `[description]` 프로세스 식별(pgrep)·포트 확인(ss) 명령 선택 이유 (평가 9)
+- [x] `[description]` CPU/MEM/DISK 추출·파싱 방식 및 로그 포맷 고정 이유 (평가 10)
+- [x] `[description]` 소유자(agent-dev)·실행자(agent-admin, cron) 권한 정책 (평가 11)
+- [x] `[description]` 모니터링 대상이 웹 서버(Nginx)로 바뀔 때 변경 포인트 (평가 17)
+- [x] `[description]` "프로세스 살아있는데 포트 안 열림" 원인 후보·확인 순서 (평가 18)
+- [x] `[description]` 로그 급증/디스크 풀 위험 시 운영자 단기·중기 대응 (평가 19)
 
 ## E. 제약 사항
 - [x] `[requirements]` 자동화 스크립트는 Bash 로만 작성 (Python 등 금지)

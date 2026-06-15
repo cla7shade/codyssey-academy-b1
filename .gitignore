@@ -1,5 +1,8 @@
 .DS_Store
 
+# 시크릿 (API 키 / 계정 비밀번호) — 커밋 금지
+.env
+
 # 미션 PDF 파일 (재배포 제한)
 mission.pdf
 misson.pdf

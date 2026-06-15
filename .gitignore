@@ -9,8 +9,8 @@ __MACOSX/
 
 # 대용량 자료
 agent-app.zip
-b1-1/agent-app/agent-app-linux-arm64
-b1-1/agent-app/agent-app-linux-x86
+agent-app/agent-app-linux-arm64
+agent-app/agent-app-linux-x86
 
 # 로컬 로그 (혹시 모를 bind-mount 잔여물)
 b1-1/logs/

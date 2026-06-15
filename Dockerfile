@@ -13,13 +13,14 @@ RUN apt-get install -y --no-install-recommends \
     sudo \
     procps \
     iproute2 \
-    logrotate
+    logrotate \
+    vim
 
 RUN mkdir -p /run/sshd
 
 # https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch03s13.html
 RUN mkdir -p /opt/agent_app/bin
-COPY agent-app/agent-app-linux-arm64 /opt/agent_app/bin/agent_app
+COPY agent-app/agent-app-linux-x86 /opt/agent_app/bin/agent_app
 RUN chmod -R 755 /opt/agent_app
 
 # entrypoint 가 install 로 옮길 원본 monitor.sh

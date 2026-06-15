@@ -25,10 +25,6 @@ echo "[HEALTH CHECK]"
 PID=$(pgrep -x "$APP_NAME" | head -n 1 || true)
 
 if [ -z "$PID" ]; then
-    PID=$(pgrep -f "$APP_NAME" | head -n 1 || true)
-fi
-
-if [ -z "$PID" ]; then
     echo "Checking process '$APP_NAME'... [FAIL]"
     echo "[ERROR] $APP_NAME process is not running"
     exit 1
